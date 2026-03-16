@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>MyPolicy – Presentation Bullets</title>
+  <style>
+    @page {
+      size: A4;
+      margin: 20mm 18mm 20mm 18mm;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 11pt;
+      color: #1a202c;
+      line-height: 1.4;
+    }
+    h1, h2, h3, h4 {
+      font-weight: 700;
+      color: #0f4c81;
+      margin-top: 18px;
+      margin-bottom: 8px;
+    }
+    h1 {
+      font-size: 20pt;
+      border-bottom: 2px solid #0f4c81;
+      padding-bottom: 4px;
+    }
+    h2 {
+      font-size: 16pt;
+    }
+    h3 {
+      font-size: 13pt;
+    }
+    p {
+      margin: 4px 0;
+    }
+    ul, ol {
+      margin: 4px 0 4px 22px;
+    }
+    code, pre {
+      font-family: "Fira Code", "Source Code Pro", Menlo, Consolas, monospace;
+      font-size: 9pt;
+    }
+    pre {
+      background: #f7fafc;
+      border-radius: 4px;
+      padding: 6px 8px;
+      border: 1px solid #e2e8f0;
+      overflow-x: auto;
+      margin: 6px 0 8px 0;
+    }
+    blockquote {
+      border-left: 3px solid #0f4c81;
+      padding-left: 10px;
+      color: #4a5568;
+      margin: 6px 0;
+    }
+    table {
+      border-collapse: collapse;
+      margin: 8px 0;
+      width: 100%;
+      font-size: 10pt;
+    }
+    th, td {
+      border: 1px solid #e2e8f0;
+      padding: 4px 6px;
+      text-align: left;
+    }
+    th {
+      background: #edf2f7;
+      font-weight: 600;
+    }
+    header {
+      text-align: right;
+      font-size: 9pt;
+      color: #718096;
+      border-bottom: 1px solid #e2e8f0;
+      margin-bottom: 8px;
+      padding-bottom: 2px;
+    }
+    footer {
+      position: fixed;
+      bottom: 6mm;
+      left: 0;
+      right: 0;
+      text-align: center;
+      font-size: 8pt;
+      color: #a0aec0;
+    }
+  </style>
+</head>
+<body>
+  <header>MyPolicy – Presentation Bullets</header>
+  <h1 id="presentation-bullets-what-i-have-built">Presentation bullets – what I have built</h1>
+<h2 id="1-data-pipeline-service-core-capabilities">1) Data-pipeline-service – core capabilities</h2>
+<ul>
+<li><strong>CSV ingestion pipeline</strong></li>
+<li>Accepts CSV uploads via REST (<code>POST /api/pipeline/upload</code>) with <code>file</code> + <code>collectionName</code>.</li>
+<li>Parses CSV files with headers into structured rows (<code>FileProcessingService</code>).</li>
+<li>Performs basic validation (non-empty file, headers present, at least one data row).</li>
+<li><strong>Metadata-driven standardization</strong></li>
+<li>Loads <code>mapping_config.json</code> at startup (<code>MappingConfig</code>).</li>
+<li>Uses a metadata-driven engine (<code>MetadataIngestionService</code>) to map insurer-specific field names into a standard <code>StandardizedRecord</code> model.</li>
+<li>Supports multiple insurer collections (life, auto, health) without hard-coding column names.</li>
+<li><strong>Data massaging &amp; type coercion</strong></li>
+<li>Automatically coerces key numeric and date-like fields (DOB, Mobile, PolicyStartDate, SumAssured, premiums, etc.) into appropriate numeric types before inserting into MongoDB.</li>
+<li><strong>MongoDB ingestion</strong></li>
+<li>Inserts parsed and massaged rows into MongoDB collections (e.g. <code>life_insurance</code>, <code>auto_insurance</code>, <code>health_insurance</code>).</li>
+<li>Audits how many records are ingested per collection.</li>
+<li><strong>Identity stitching (Customer Master linkage)</strong></li>
+<li>Fetches standardized policy records from MongoDB and links them to <code>CustomerDetails</code> (Customer Master) using ordered matching rules:<ul>
+<li>Rule 1: Match by PAN.</li>
+<li>Rule 2: Match by Mobile + DOB.</li>
+<li>Rule 3: Match by Email + DOB.</li>
+</ul>
+</li>
+<li>Builds <code>UnifiedPortfolioRecord</code> entries with customerId, policy details, and encrypted PII (PAN, mobile, email).</li>
+<li>Tracks <code>totalProcessed</code>, <code>matched</code>, and <code>unmatched</code> counts as a <code>StitchingResult</code>.</li>
+<li><strong>Unified portfolio API</strong></li>
+<li>Provides a stitched portfolio view (via portfolio-related services/controllers) that can be consumed by the BFF to show a consolidated customer portfolio.</li>
+</ul>
+<h2 id="2-config-service-centralized-configuration">2) Config-service – centralized configuration</h2>
+<ul>
+<li><strong>Centralized config server</strong></li>
+<li>Spring Cloud Config Server running on port <code>8888</code> as the single source of truth for configuration.</li>
+<li><strong>Externalized service configs</strong></li>
+<li>Serves YAML/properties for services like <code>customer-service</code>, <code>bff-service</code>, and others (ports, DB URIs, Feign URLs, logging, actuator exposure).</li>
+<li><strong>File-based repo for development</strong></li>
+<li>Uses a local <code>config-repo</code> (classpath and file system) so configs are easy to version, edit, and share in a dev setup.</li>
+<li><strong>Supports YAML and properties</strong></li>
+<li>Reads both <code>.yaml</code> and <code>.properties</code> files, letting each microservice organize configuration in the most convenient format.</li>
+<li><strong>Secured endpoints</strong></li>
+<li>Protects config endpoints with basic auth (<code>admin</code> / <code>config123</code>) so only trusted clients can fetch environment details.</li>
+<li><strong>Operational visibility</strong></li>
+<li>Exposes actuator endpoints like <code>health</code>, <code>info</code>, <code>refresh</code>, and <code>env</code> to monitor the config server and trigger config refresh without redeploys.</li>
+<li><strong>Startup ordering</strong></li>
+<li>Must be started <strong>before</strong> other backend services so they can fetch configuration on startup.</li>
+</ul>
+<h2 id="3-policy-service-what-it-provides">3) Policy-service – what it provides</h2>
+<ul>
+<li><strong>Policy domain model</strong></li>
+<li><code>Policy</code> entity stored in MongoDB (<code>policies</code> collection) with indexes on <code>policyNumber</code> + <code>insurerId</code>.</li>
+<li>Fields include customerId, insurerId, policyNumber, policyType, planName, premiumAmount, sumAssured, startDate, endDate, status, timestamps.</li>
+<li><strong>CRUD and query APIs</strong></li>
+<li><code>POST /api/v1/policies</code> – create a new policy from <code>PolicyRequest</code>.</li>
+<li><code>GET /api/v1/policies/customer/{customerId}</code> – fetch all policies for a given customer.</li>
+<li><code>GET /api/v1/policies/{id}</code> – get a single policy by ID.</li>
+<li><code>GET /api/v1/policies</code> – list all policies.</li>
+<li><code>PATCH /api/v1/policies/{id}/status?status=...</code> – update policy status.</li>
+<li><code>DELETE /api/v1/policies/{id}</code> – delete a policy.</li>
+<li><strong>Support for integration</strong></li>
+<li>Exposes a clean policy API that can be called by other services (e.g., BFF or data-pipeline) when required.</li>
+</ul>
+<h2 id="4-connection-between-backend-services">4) Connection between backend services</h2>
+<ul>
+<li><strong>Configuration &amp; discovery</strong></li>
+<li><code>config-service</code> (port 8888) centralizes configuration for all services.</li>
+<li><code>discovery-service</code> (Eureka, port 8761) lets services register and discover each other by logical name.</li>
+<li><strong>Domain services</strong></li>
+<li><code>customer-service</code> (8081): owns customer master data and authentication.</li>
+<li><code>policy-service</code> (8085): owns policy records and CRUD operations.</li>
+<li><code>data-pipeline-service</code> (8082): ingests insurer datasets, standardizes them, and stitches policies to customers into a unified portfolio view.</li>
+<li><strong>Backend-for-Frontend (BFF)</strong></li>
+<li><code>bff-service</code> (8090) acts as the single entry point for the UI.</li>
+<li>Uses Feign/HTTP clients to call:<ul>
+<li><code>customer-service</code> for customer details by customerId.</li>
+<li><code>data-pipeline-service</code> for stitched portfolio (<code>unified_portfolio</code>).</li>
+<li>(Can also interact with <code>policy-service</code> directly if needed).</li>
+</ul>
+</li>
+<li><strong>Portfolio aggregation flow</strong></li>
+<li><code>PortfolioService</code> in BFF:<ul>
+<li>Calls <code>customer-service</code> to fetch <code>CustomerDTO</code>.</li>
+<li>Calls <code>data-pipeline-service</code> to fetch <code>DataPipelinePortfolioResponse</code> (stitched policies).</li>
+<li>Maps stitched records into BFF-level <code>PolicyDTO</code> objects.</li>
+<li>Calculates total premium and total coverage across all policies.</li>
+<li>Returns a single <code>PortfolioResponse</code> to the frontend.</li>
+</ul>
+</li>
+</ul>
+<h2 id="5-connection-between-backend-and-frontend">5) Connection between backend and frontend</h2>
+<ul>
+<li><strong>Authentication and login</strong></li>
+<li>Flutter frontend login screen collects <code>Customer ID/User ID</code> and password.</li>
+<li>Frontend calls BFF login endpoint (<code>/api/bff/auth/login</code>) through an API client.</li>
+<li>User ID is effectively linked to the customer identity used in backend services; upon success, frontend navigates to the dashboard with the resolved <code>customerId</code>.</li>
+<li><strong>Portfolio retrieval</strong></li>
+<li>After login, frontend dashboard requests the portfolio from BFF:<ul>
+<li><code>GET /api/bff/portfolio/{customerId}</code> with Bearer JWT token.</li>
+</ul>
+</li>
+<li>BFF internally orchestrates:<ul>
+<li>customer details from <code>customer-service</code>.</li>
+<li>stitched portfolio from <code>data-pipeline-service</code>.</li>
+</ul>
+</li>
+<li>The response contains:<ul>
+<li>customer profile data.</li>
+<li>list of normalized policies.</li>
+<li>total premium and total coverage numbers.</li>
+</ul>
+</li>
+<li><strong>UI behaviour</strong></li>
+<li>Login screen shows meaningful error messages on API failures.</li>
+<li>On successful login, the user is redirected to a dashboard that visualizes the aggregated portfolio returned by BFF.</li>
+</ul>
+<p>Use these bullets as talking points:
+- Start with data-pipeline-service capabilities.
+- Then highlight policy-service APIs.
+- Then explain how all backend services collaborate (config, discovery, domain services, BFF).
+- Finally, show how the Flutter frontend only talks to BFF, which hides the complexity of the microservices behind a simple login + portfolio experience.</p>
+  <footer>Generated Presentation · MyPolicy</footer>
+</body>
+</html>

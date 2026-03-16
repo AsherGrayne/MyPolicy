@@ -1,7 +1,9 @@
 package com.mypolicy.implementation.service;
 
 import com.mypolicy.implementation.config.MappingConfig;
+import com.mypolicy.implementation.model.FailedLogRecord;
 import com.mypolicy.implementation.model.StandardizedRecord;
+import com.mypolicy.implementation.repository.FailedLogRepository;
 import com.mypolicy.implementation.util.DataMassagingUtil;
 import org.bson.Document;
 import org.slf4j.Logger;
@@ -27,11 +29,19 @@ public class MetadataIngestionService {
     private final MongoTemplate mongoTemplate;
     private final MappingConfig mappingConfig;
     private final AuditLogger auditLogger;
+    private final DownstreamRetryExecutor downstreamRetryExecutor;
+    private final FailedLogRepository failedLogRepository;
 
-    public MetadataIngestionService(MongoTemplate mongoTemplate, MappingConfig mappingConfig, AuditLogger auditLogger) {
+    public MetadataIngestionService(MongoTemplate mongoTemplate,
+                                    MappingConfig mappingConfig,
+                                    AuditLogger auditLogger,
+                                    DownstreamRetryExecutor downstreamRetryExecutor,
+                                    FailedLogRepository failedLogRepository) {
         this.mongoTemplate = mongoTemplate;
         this.mappingConfig = mappingConfig;
         this.auditLogger = auditLogger;
+        this.downstreamRetryExecutor = downstreamRetryExecutor;
+        this.failedLogRepository = failedLogRepository;
     }
 
     private static final List<String> POLICY_COLLECTIONS = List.of(
@@ -45,7 +55,11 @@ public class MetadataIngestionService {
             return List.of();
         }
 
-        List<Document> docs = mongoTemplate.findAll(Document.class, collectionName);
+        List<Document> docs = downstreamRetryExecutor.executeWithRetry(
+                () -> mongoTemplate.findAll(Document.class, collectionName),
+                "mongo.findAll",
+                "collection=" + collectionName
+        );
         List<StandardizedRecord> records = new ArrayList<>();
 
         for (Document doc : docs) {
@@ -90,15 +104,97 @@ public class MetadataIngestionService {
             throw new IllegalArgumentException("Unknown collection: " + collectionName);
         }
 
+        String policyIdSourceKey = mapping.get("policy_id");
+        String insurerSourceKey = mapping.get("insurer");
+        int totalRows = rows.size();
+
+        // Build a set of existing composite keys (policyNumber + insurerId) for idempotent ingestion.
+        // For larger datasets this can be optimized, but it is sufficient for current sample sizes.
+        var existingKeys = new java.util.HashSet<String>();
+        if (policyIdSourceKey != null && insurerSourceKey != null) {
+            List<Document> existingDocs = downstreamRetryExecutor.executeWithRetry(
+                    () -> mongoTemplate.findAll(Document.class, collectionName),
+                    "mongo.findAll",
+                    "collection=" + collectionName + ", purpose=buildExistingKeys"
+            );
+            for (Document doc : existingDocs) {
+                Object policyVal = doc.get(policyIdSourceKey);
+                Object insurerVal = doc.get(insurerSourceKey);
+                if (policyVal != null && insurerVal != null) {
+                    String key = policyVal.toString().trim() + "|" + insurerVal.toString().trim();
+                    existingKeys.add(key);
+                }
+            }
+        }
+
         List<Document> documents = new ArrayList<>();
+        var batchKeys = new java.util.HashSet<String>();
+        int skippedDuplicates = 0;
+        int failedValidation = 0;
+
         for (Map<String, Object> row : rows) {
             Map<String, Object> coerced = coerceNumericFields(row, mapping);
+
+            // Hard validation for identity fields: if a row has invalid PAN / mobile / email / DOB,
+            // log it to failed_log and skip ingesting it into the main collection.
+            List<String> validationErrors = validateSemantic(row, coerced, mapping, collectionName);
+            if (!validationErrors.isEmpty()) {
+                FailedLogRecord failed = new FailedLogRecord();
+                failed.setSourceCollection(collectionName);
+                Object insurerValRaw = row.get(mapping.get("insurer"));
+                failed.setInsurer(insurerValRaw != null ? insurerValRaw.toString() : null);
+                failed.setRawData(new java.util.HashMap<>(row));
+                failed.setValidationErrors(String.join("; ", validationErrors));
+                failed.setCreatedAt(java.time.Instant.now());
+                failedLogRepository.save(failed);
+                failedValidation++;
+                // Skip this row from normal ingestion
+                continue;
+            }
+
+            if (policyIdSourceKey != null && insurerSourceKey != null) {
+                Object policyVal = coerced.get(policyIdSourceKey);
+                Object insurerVal = coerced.get(insurerSourceKey);
+                if (policyVal != null && insurerVal != null) {
+                    String key = policyVal.toString().trim() + "|" + insurerVal.toString().trim();
+                    if (existingKeys.contains(key) || batchKeys.contains(key)) {
+                        skippedDuplicates++;
+                        continue;
+                    }
+                    batchKeys.add(key);
+                    existingKeys.add(key);
+                }
+            }
+
             documents.add(new Document(coerced));
         }
 
-        mongoTemplate.insert(documents, collectionName);
+        // If all rows failed validation, surface this clearly
+        if (failedValidation == totalRows) {
+            throw new IllegalArgumentException("All rows failed validation for collection " + collectionName);
+        }
+
+        if (documents.isEmpty()) {
+            log.info("No new records to ingest into {} (all rows were duplicates)", collectionName);
+            return;
+        }
+
+        downstreamRetryExecutor.executeVoidWithRetry(
+                () -> mongoTemplate.insert(documents, collectionName),
+                "mongo.insertMany",
+                "collection=" + collectionName + ", count=" + documents.size()
+        );
         auditLogger.logMapping(collectionName + "_ingest", documents.size());
-        log.info("Ingested {} records into {}", documents.size(), collectionName);
+        log.info("Ingested {} records into {} (skipped {} duplicate rows based on policyNumber+insurerId, {} rows failed validation and were sent to failed_log)",
+                documents.size(), collectionName, skippedDuplicates, failedValidation);
+
+        // Step 4: if more than 20% of rows failed validation, mark the operation as failed
+        if (failedValidation > 0 && failedValidation * 1.0 / totalRows > 0.2) {
+            throw new IllegalArgumentException(
+                    "Too many rows failed validation for collection " + collectionName +
+                            ": " + failedValidation + " of " + totalRows
+            );
+        }
     }
 
     private Map<String, Object> coerceNumericFields(Map<String, Object> row, Map<String, String> mapping) {
@@ -122,5 +218,67 @@ public class MetadataIngestionService {
             }
         }
         return result;
+    }
+
+    /**
+     * Per-row semantic validation before ingestion. Returns a list of human-readable error messages.
+     * If the list is non-empty, the row is considered invalid and should be written to failed_log.
+     */
+    private List<String> validateSemantic(Map<String, Object> originalRow,
+                                          Map<String, Object> coercedRow,
+                                          Map<String, String> mapping,
+                                          String collectionName) {
+        List<String> errors = new ArrayList<>();
+
+        String panKey = mapping.get("pan");
+        String mobileKey = mapping.get("mobile");
+        String emailKey = mapping.get("email");
+        String dobKey = mapping.get("dob");
+
+        // PAN pattern check (simple Indian PAN-like pattern)
+        if (panKey != null) {
+            Object panVal = originalRow.get(panKey);
+            if (panVal != null) {
+                String pan = panVal.toString().trim();
+                if (!pan.isEmpty() && !pan.matches("^[A-Z]{5}[0-9]{4}[A-Z]$")) {
+                    errors.add("Invalid PAN format: " + pan);
+                }
+            }
+        }
+
+        // Mobile numeric + length check
+        if (mobileKey != null) {
+            Object mobileVal = originalRow.get(mobileKey);
+            if (mobileVal != null) {
+                String mobile = mobileVal.toString().replaceAll("\\D", "");
+                if (!mobile.isEmpty() && (mobile.length() < 8 || mobile.length() > 15)) {
+                    errors.add("Invalid mobile length: " + mobileVal);
+                }
+            }
+        }
+
+        // Email basic pattern
+        if (emailKey != null) {
+            Object emailVal = originalRow.get(emailKey);
+            if (emailVal != null) {
+                String email = emailVal.toString().trim();
+                if (!email.isEmpty() && !email.matches("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$")) {
+                    errors.add("Invalid email format: " + email);
+                }
+            }
+        }
+
+        // DOB must be 8-digit YYYYMMDD if present
+        if (dobKey != null) {
+            Object dobVal = originalRow.get(dobKey);
+            if (dobVal != null) {
+                String dobStr = dobVal.toString().trim();
+                if (!dobStr.isEmpty() && !dobStr.matches("^\\d{8}$")) {
+                    errors.add("Invalid DOB format (expected YYYYMMDD): " + dobStr);
+                }
+            }
+        }
+
+        return errors;
     }
 }

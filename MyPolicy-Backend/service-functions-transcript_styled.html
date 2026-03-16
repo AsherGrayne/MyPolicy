@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>MyPolicy – Service Functions Transcript</title>
+  <style>
+    @page {
+      size: A4;
+      margin: 20mm 18mm 20mm 18mm;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 11pt;
+      color: #1a202c;
+      line-height: 1.4;
+    }
+    h1, h2, h3, h4 {
+      font-weight: 700;
+      color: #0f4c81;
+      margin-top: 18px;
+      margin-bottom: 8px;
+    }
+    h1 {
+      font-size: 20pt;
+      border-bottom: 2px solid #0f4c81;
+      padding-bottom: 4px;
+    }
+    h2 {
+      font-size: 16pt;
+    }
+    h3 {
+      font-size: 13pt;
+    }
+    p {
+      margin: 4px 0;
+    }
+    ul, ol {
+      margin: 4px 0 4px 22px;
+    }
+    code, pre {
+      font-family: "Fira Code", "Source Code Pro", Menlo, Consolas, monospace;
+      font-size: 9pt;
+    }
+    pre {
+      background: #f7fafc;
+      border-radius: 4px;
+      padding: 6px 8px;
+      border: 1px solid #e2e8f0;
+      overflow-x: auto;
+      margin: 6px 0 8px 0;
+    }
+    blockquote {
+      border-left: 3px solid #0f4c81;
+      padding-left: 10px;
+      color: #4a5568;
+      margin: 6px 0;
+    }
+    table {
+      border-collapse: collapse;
+      margin: 8px 0;
+      width: 100%;
+      font-size: 10pt;
+    }
+    th, td {
+      border: 1px solid #e2e8f0;
+      padding: 4px 6px;
+      text-align: left;
+    }
+    th {
+      background: #edf2f7;
+      font-weight: 600;
+    }
+    header {
+      text-align: right;
+      font-size: 9pt;
+      color: #718096;
+      border-bottom: 1px solid #e2e8f0;
+      margin-bottom: 8px;
+      padding-bottom: 2px;
+    }
+    footer {
+      position: fixed;
+      bottom: 6mm;
+      left: 0;
+      right: 0;
+      text-align: center;
+      font-size: 8pt;
+      color: #a0aec0;
+    }
+  </style>
+</head>
+<body>
+  <header>MyPolicy – Service Functions Transcript</header>
+  <h1 id="service-functions-presentation-script">Service functions – presentation script</h1>
+<h2 id="1-config-service-what-it-does">1) config-service – what it does</h2>
+<p>"The first backend service in the system is the <strong>config-service</strong>.
+Its main job is to act as a <strong>central configuration server</strong> for all the other microservices.</p>
+<p>Instead of hard-coding things like database URLs, service URLs, and credentials directly inside each service, we externalize those settings into the config-service.
+All the other services connect to config-service on startup, pull their configuration, and can even refresh it without redeploying.</p>
+<p>This gives us:
+- Consistent configuration across environments,
+- A single place to manage sensitive or environment-specific values,
+- And easier operations, because we change configuration once and all services consume it in a standard way."</p>
+<h2 id="2-discovery-service-what-it-does">2) discovery-service – what it does</h2>
+<p>"The second core service is the <strong>discovery-service</strong>, which runs Eureka.
+Its job is <strong>service discovery</strong>.</p>
+<p>In a microservices setup, we don't want services to talk to each other using hard-coded hostnames and ports.
+Instead, each service registers itself with discovery-service when it starts, and then other services can find it by its logical name.</p>
+<p>For example, the BFF doesn't need to know where <code>data-pipeline-service</code> is deployed.
+It just calls it by name, and Eureka resolves the actual instance.</p>
+<p>This makes the system much more flexible:
+- We can scale services horizontally,
+- We can move services between hosts or containers,
+- And clients stay decoupled from physical addresses, relying only on service names."</p>
+<h2 id="3-customer-service-what-it-does">3) customer-service – what it does</h2>
+<p>"The <strong>customer-service</strong> is responsible for <strong>customer master data and authentication</strong>.</p>
+<p>Functionally, it:
+- Stores customer profiles in MongoDB — things like full name, mobile number, email, PAN, and customerId.
+- Exposes APIs to register and update customers.
+- Provides search APIs by mobile, email, or PAN.
+- Implements login using <code>Full Name + PAN</code>, and issues <strong>JWT tokens</strong> that the rest of the system uses for secure calls.</p>
+<p>Because it owns the customer master, other services do not maintain their own copies of customer identity.
+They refer to customers by the <code>customerId</code> generated and managed by customer-service.</p>
+<p>In the overall architecture, customer-service is the <strong>source of truth</strong> for who the customer is, and it is the entry point for user authentication."</p>
+<h2 id="4-policy-service-what-it-does">4) policy-service – what it does</h2>
+<p>"Next is the <strong>policy-service</strong>, which owns the <strong>core policy records</strong>.</p>
+<p>Its responsibilities are:
+- To store and manage insurance policies in a dedicated <code>policies</code> collection in MongoDB.
+- To allow creation of new policies, retrieval by ID, retrieval by customer, listing all policies, and updating policy status.</p>
+<p>So if I want to answer questions like:
+- 'What policies does customer X have?'
+- 'What is the status of this specific policy?'
+- 'Show me all active policies in the system.'</p>
+<p>— those are handled by the policy-service.</p>
+<p>It is intentionally focused on the <strong>operational CRUD</strong> view of policies.
+Higher-level analytics, stitching across multiple insurers, and portfolio calculations are delegated to the data-pipeline-service and BFF."</p>
+<h2 id="5-data-pipeline-service-what-it-does">5) data-pipeline-service – what it does</h2>
+<p>"The <strong>data-pipeline-service</strong> is the heart of the <strong>ingestion and portfolio stitching</strong> part of the platform.</p>
+<p>It has three big responsibilities:</p>
+<ol>
+<li><strong>Ingestion and standardization</strong></li>
+<li>It accepts CSV files from various insurers.</li>
+<li>It parses these files, validates structure, and ingests the data into MongoDB.</li>
+<li>
+<p>It uses a <strong>metadata-driven mapping engine</strong> so that different insurer column names can be mapped into a standard internal schema, without changing code.</p>
+</li>
+<li>
+<p><strong>Data massaging and identity stitching</strong></p>
+</li>
+<li>It automatically coerces key fields like dates, mobile numbers, premiums, and coverage amounts into appropriate numeric types.</li>
+<li>It then performs <strong>identity stitching</strong> to link policies to the central customer master using a rule-based order: PAN first, then Mobile + Date of Birth, and finally Email + Date of Birth.</li>
+<li>
+<p>The output is a unified <code>unified_portfolio</code> collection, which consolidates all matched policies per customer and also stores encrypted versions of PII such as PAN, mobile, and email.</p>
+</li>
+<li>
+<p><strong>Portfolio and advisory APIs</strong></p>
+</li>
+<li>It exposes APIs that return a stitched portfolio for a customer.</li>
+<li>It exposes an advisory API that runs coverage rules and returns recommendations and gap analysis for that customer.</li>
+</ol>
+<p>In short, data-pipeline-service takes messy, multi-insurer input data and transforms it into a <strong>clean, unified portfolio</strong> plus <strong>actionable coverage advice</strong>."</p>
+<h2 id="6-bff-service-what-it-does">6) bff-service – what it does</h2>
+<p>"Finally, the <strong>bff-service</strong>, or Backend for Frontend, is the <strong>single entry point</strong> for the frontend.</p>
+<p>Its main responsibilities are:</p>
+<ul>
+<li><strong>Authentication bridge</strong></li>
+<li>It exposes a simple login API for the Flutter frontend.</li>
+<li>
+<p>Under the hood, it delegates authentication to customer-service and passes back the JWT and customer details.</p>
+</li>
+<li>
+<p><strong>Portfolio aggregation</strong></p>
+</li>
+<li>When the frontend requests a customer's portfolio, the BFF:<ul>
+<li>Calls customer-service to get customer profile details.</li>
+<li>Calls data-pipeline-service to get the stitched portfolio for that customer.</li>
+</ul>
+</li>
+<li>
+<p>Then it combines these results and calculates totals such as total premium and total coverage, and returns a single, frontend-friendly response.</p>
+</li>
+<li>
+<p><strong>Advisory and insights</strong></p>
+</li>
+<li>It proxies the advisory API from data-pipeline-service.</li>
+<li>
+<p>It can also compute additional insights or summaries tailored to the UI.</p>
+</li>
+<li>
+<p><strong>Upload orchestration</strong></p>
+</li>
+<li>For admin or operations UIs, it exposes an upload API that receives insurer CSV files and forwards them into the ingestion pipeline.</li>
+</ul>
+<p>The key idea is:
+the BFF hides the complexity of multiple microservices from the frontend.
+The frontend only needs to know a small set of BFF APIs, and the BFF is responsible for orchestrating calls to customer-service, policy-service (if needed), and data-pipeline-service."</p>
+<h2 id="7-how-they-work-together-one-liner-summary">7) How they work together – one-liner summary</h2>
+<p>"Putting it all together:
+- <strong>config-service</strong> centralizes configuration,
+- <strong>discovery-service</strong> lets services find each other,
+- <strong>customer-service</strong> owns customer identity and authentication,
+- <strong>policy-service</strong> manages raw policy records,
+- <strong>data-pipeline-service</strong> ingests, standardizes, and stitches policies into unified portfolios and advisories,
+- and <strong>bff-service</strong> sits in front, exposing a simple set of APIs to the frontend by orchestrating all the backend services behind the scenes."</p>
+  <footer>Generated Presentation · MyPolicy</footer>
+</body>
+</html>

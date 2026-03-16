@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>MyPolicy – API Summary</title>
+  <style>
+    @page {
+      size: A4;
+      margin: 20mm 18mm 20mm 18mm;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 11pt;
+      color: #1a202c;
+      line-height: 1.4;
+    }
+    h1, h2, h3, h4 {
+      font-weight: 700;
+      color: #0f4c81;
+      margin-top: 18px;
+      margin-bottom: 8px;
+    }
+    h1 {
+      font-size: 20pt;
+      border-bottom: 2px solid #0f4c81;
+      padding-bottom: 4px;
+    }
+    h2 {
+      font-size: 16pt;
+    }
+    h3 {
+      font-size: 13pt;
+    }
+    p {
+      margin: 4px 0;
+    }
+    ul, ol {
+      margin: 4px 0 4px 22px;
+    }
+    code, pre {
+      font-family: "Fira Code", "Source Code Pro", Menlo, Consolas, monospace;
+      font-size: 9pt;
+    }
+    pre {
+      background: #f7fafc;
+      border-radius: 4px;
+      padding: 6px 8px;
+      border: 1px solid #e2e8f0;
+      overflow-x: auto;
+      margin: 6px 0 8px 0;
+    }
+    blockquote {
+      border-left: 3px solid #0f4c81;
+      padding-left: 10px;
+      color: #4a5568;
+      margin: 6px 0;
+    }
+    table {
+      border-collapse: collapse;
+      margin: 8px 0;
+      width: 100%;
+      font-size: 10pt;
+    }
+    th, td {
+      border: 1px solid #e2e8f0;
+      padding: 4px 6px;
+      text-align: left;
+    }
+    th {
+      background: #edf2f7;
+      font-weight: 600;
+    }
+    header {
+      text-align: right;
+      font-size: 9pt;
+      color: #718096;
+      border-bottom: 1px solid #e2e8f0;
+      margin-bottom: 8px;
+      padding-bottom: 2px;
+    }
+    footer {
+      position: fixed;
+      bottom: 6mm;
+      left: 0;
+      right: 0;
+      text-align: center;
+      font-size: 8pt;
+      color: #a0aec0;
+    }
+  </style>
+</head>
+<body>
+  <header>MyPolicy – API Summary</header>
+  <h1 id="api-summary-names-and-intended-use">API summary – names and intended use</h1>
+<h2 id="1-data-pipeline-service-port-8082">1) data-pipeline-service (port 8082)</h2>
+<ul>
+<li>GET /api/portfolio/{customerId}</li>
+<li>
+<p>Intended use: Return the stitched insurance portfolio for a specific customer from the unified_portfolio collection (all matched policies across insurers).</p>
+</li>
+<li>
+<p>GET /api/advisory/{customerId}</p>
+</li>
+<li>
+<p>Intended use: Return coverage advisory / gap analysis for a customer, based on their stitched portfolio (recommendations and notes).</p>
+</li>
+<li>
+<p>POST /api/pipeline/run</p>
+</li>
+<li>
+<p>Intended use: Trigger the full ingestion and stitching pipeline over existing insurer collections already in MongoDB (standardize + stitch into unified_portfolio).</p>
+</li>
+<li>
+<p>POST /api/pipeline/upload</p>
+</li>
+<li>
+<p>Intended use: Accept a CSV file (multipart form-data: file + collectionName), ingest it into the correct MongoDB collection, then standardize and stitch policies to customers.</p>
+</li>
+<li>
+<p>GET /insurer-portal</p>
+</li>
+<li>
+<p>Intended use: Serve a simple HTML page for insurer users to upload their policy CSV files.</p>
+</li>
+<li>
+<p>GET /actuator/health</p>
+</li>
+<li>Intended use: Basic health check endpoint for data-pipeline-service (used by monitoring or verify-services script).</li>
+</ul>
+<h2 id="2-policy-service-port-8085">2) policy-service (port 8085)</h2>
+<ul>
+<li>POST /api/v1/policies</li>
+<li>
+<p>Intended use: Create a new policy record for a customer with all relevant details (policyNumber, insurerId, premium, sumAssured, dates, etc.).</p>
+</li>
+<li>
+<p>GET /api/v1/policies</p>
+</li>
+<li>
+<p>Intended use: Retrieve a list of all policies in the system (admin or reporting scenarios).</p>
+</li>
+<li>
+<p>GET /api/v1/policies/{id}</p>
+</li>
+<li>
+<p>Intended use: Fetch a single policy by its unique ID (view or manage one policy).</p>
+</li>
+<li>
+<p>GET /api/v1/policies/customer/{customerId}</p>
+</li>
+<li>
+<p>Intended use: Fetch all policies that belong to a specific customerId.</p>
+</li>
+<li>
+<p>PATCH /api/v1/policies/{id}/status?status=...</p>
+</li>
+<li>
+<p>Intended use: Update the status of a policy (for example, ACTIVE, LAPSED, CANCELLED).</p>
+</li>
+<li>
+<p>DELETE /api/v1/policies/{id}</p>
+</li>
+<li>
+<p>Intended use: Delete a policy record by ID.</p>
+</li>
+<li>
+<p>GET /api/v1/health</p>
+</li>
+<li>
+<p>Intended use: Health check endpoint for policy-service.</p>
+</li>
+<li>
+<p>GET /api/v1/ping</p>
+</li>
+<li>Intended use: Lightweight ping endpoint to verify that policy-service is reachable.</li>
+</ul>
+<h2 id="3-integration-of-backend-services-via-bff-bff-service-port-8090">3) Integration of backend services via BFF (bff-service, port 8090)</h2>
+<ul>
+<li>POST /api/bff/auth/login</li>
+<li>
+<p>Intended use: Frontend login using Full Name + PAN; BFF talks to customer-service, verifies credentials, and returns a JWT token plus customer summary.</p>
+</li>
+<li>
+<p>GET /api/bff/portfolio/{customerId}</p>
+</li>
+<li>
+<p>Intended use: Provide the frontend with a unified portfolio for a customer (customer details + aggregated policies + total premium and coverage), combining data from customer-service and data-pipeline-service.</p>
+</li>
+<li>
+<p>GET /api/bff/advisory/{customerId}</p>
+</li>
+<li>
+<p>Intended use: Provide the frontend with coverage advisory for a customer, proxied from data-pipeline-service’s advisory API.</p>
+</li>
+<li>
+<p>GET /api/bff/insights/{customerId}</p>
+</li>
+<li>
+<p>Intended use: Return additional coverage insights and recommendations, computed in the BFF using portfolio data.</p>
+</li>
+<li>
+<p>POST /api/bff/upload</p>
+</li>
+<li>
+<p>Intended use: Allow the frontend (or an operations UI) to upload insurer CSV files (multipart form-data: file, uploadedBy, insurerId), which the BFF then forwards into the ingestion pipeline.</p>
+</li>
+<li>
+<p>GET /api/bff/upload/status/{jobId}</p>
+</li>
+<li>
+<p>Intended use: Check the ingestion job status for a previously uploaded file.</p>
+</li>
+<li>
+<p>GET /api/bff/health</p>
+</li>
+<li>
+<p>Intended use: Health check endpoint for the BFF (for monitoring and smoke tests).</p>
+</li>
+<li>
+<p>GET /api/bff/ping</p>
+</li>
+<li>Intended use: Simple connectivity/ping endpoint to verify the BFF is up.</li>
+</ul>
+<h2 id="4-connection-from-frontend-to-backend-through-bff">4) Connection from frontend to backend (through BFF)</h2>
+<ul>
+<li>POST /api/bff/auth/login</li>
+<li>
+<p>Intended use (frontend): User submits Customer ID/User ID and password (PAN) from the Flutter login screen; receives JWT + customerId for future calls.</p>
+</li>
+<li>
+<p>GET /api/bff/portfolio/{customerId}</p>
+</li>
+<li>
+<p>Intended use (frontend): Dashboard screen loads the customer’s full insurance portfolio using the JWT token.</p>
+</li>
+<li>
+<p>GET /api/bff/advisory/{customerId}</p>
+</li>
+<li>
+<p>Intended use (frontend): Advisory or recommendations panel shows coverage gaps and suggestions based on the advisory response from BFF.</p>
+</li>
+<li>
+<p>POST /api/bff/upload (optional, if exposed in UI)</p>
+</li>
+<li>Intended use (frontend/admin): Operations user uploads new insurer datasets, which flow into the data-pipeline-service via BFF.</li>
+</ul>
+  <footer>Generated Presentation · MyPolicy</footer>
+</body>
+</html>

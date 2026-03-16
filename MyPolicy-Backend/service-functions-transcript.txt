@@ -1,0 +1,137 @@
+Service functions – presentation script
+======================================
+
+1) config-service – what it does
+--------------------------------
+
+"The first backend service in the system is the **config-service**.
+Its main job is to act as a **central configuration server** for all the other microservices.
+
+Instead of hard-coding things like database URLs, service URLs, and credentials directly inside each service, we externalize those settings into the config-service.
+All the other services connect to config-service on startup, pull their configuration, and can even refresh it without redeploying.
+
+This gives us:
+- Consistent configuration across environments,
+- A single place to manage sensitive or environment-specific values,
+- And easier operations, because we change configuration once and all services consume it in a standard way."
+
+
+2) discovery-service – what it does
+-----------------------------------
+
+"The second core service is the **discovery-service**, which runs Eureka.
+Its job is **service discovery**.
+
+In a microservices setup, we don't want services to talk to each other using hard-coded hostnames and ports.
+Instead, each service registers itself with discovery-service when it starts, and then other services can find it by its logical name.
+
+For example, the BFF doesn't need to know where `data-pipeline-service` is deployed.
+It just calls it by name, and Eureka resolves the actual instance.
+
+This makes the system much more flexible:
+- We can scale services horizontally,
+- We can move services between hosts or containers,
+- And clients stay decoupled from physical addresses, relying only on service names."
+
+
+3) customer-service – what it does
+----------------------------------
+
+"The **customer-service** is responsible for **customer master data and authentication**.
+
+Functionally, it:
+- Stores customer profiles in MongoDB — things like full name, mobile number, email, PAN, and customerId.
+- Exposes APIs to register and update customers.
+- Provides search APIs by mobile, email, or PAN.
+- Implements login using `Full Name + PAN`, and issues **JWT tokens** that the rest of the system uses for secure calls.
+
+Because it owns the customer master, other services do not maintain their own copies of customer identity.
+They refer to customers by the `customerId` generated and managed by customer-service.
+
+In the overall architecture, customer-service is the **source of truth** for who the customer is, and it is the entry point for user authentication."
+
+
+4) policy-service – what it does
+--------------------------------
+
+"Next is the **policy-service**, which owns the **core policy records**.
+
+Its responsibilities are:
+- To store and manage insurance policies in a dedicated `policies` collection in MongoDB.
+- To allow creation of new policies, retrieval by ID, retrieval by customer, listing all policies, and updating policy status.
+
+So if I want to answer questions like:
+- 'What policies does customer X have?'
+- 'What is the status of this specific policy?'
+- 'Show me all active policies in the system.'
+
+— those are handled by the policy-service.
+
+It is intentionally focused on the **operational CRUD** view of policies.
+Higher-level analytics, stitching across multiple insurers, and portfolio calculations are delegated to the data-pipeline-service and BFF."
+
+
+5) data-pipeline-service – what it does
+---------------------------------------
+
+"The **data-pipeline-service** is the heart of the **ingestion and portfolio stitching** part of the platform.
+
+It has three big responsibilities:
+
+1. **Ingestion and standardization**
+   - It accepts CSV files from various insurers.
+   - It parses these files, validates structure, and ingests the data into MongoDB.
+   - It uses a **metadata-driven mapping engine** so that different insurer column names can be mapped into a standard internal schema, without changing code.
+
+2. **Data massaging and identity stitching**
+   - It automatically coerces key fields like dates, mobile numbers, premiums, and coverage amounts into appropriate numeric types.
+   - It then performs **identity stitching** to link policies to the central customer master using a rule-based order: PAN first, then Mobile + Date of Birth, and finally Email + Date of Birth.
+   - The output is a unified `unified_portfolio` collection, which consolidates all matched policies per customer and also stores encrypted versions of PII such as PAN, mobile, and email.
+
+3. **Portfolio and advisory APIs**
+   - It exposes APIs that return a stitched portfolio for a customer.
+   - It exposes an advisory API that runs coverage rules and returns recommendations and gap analysis for that customer.
+
+In short, data-pipeline-service takes messy, multi-insurer input data and transforms it into a **clean, unified portfolio** plus **actionable coverage advice**."
+
+
+6) bff-service – what it does
+-----------------------------
+
+"Finally, the **bff-service**, or Backend for Frontend, is the **single entry point** for the frontend.
+
+Its main responsibilities are:
+
+- **Authentication bridge**
+  - It exposes a simple login API for the Flutter frontend.
+  - Under the hood, it delegates authentication to customer-service and passes back the JWT and customer details.
+
+- **Portfolio aggregation**
+  - When the frontend requests a customer's portfolio, the BFF:
+    - Calls customer-service to get customer profile details.
+    - Calls data-pipeline-service to get the stitched portfolio for that customer.
+  - Then it combines these results and calculates totals such as total premium and total coverage, and returns a single, frontend-friendly response.
+
+- **Advisory and insights**
+  - It proxies the advisory API from data-pipeline-service.
+  - It can also compute additional insights or summaries tailored to the UI.
+
+- **Upload orchestration**
+  - For admin or operations UIs, it exposes an upload API that receives insurer CSV files and forwards them into the ingestion pipeline.
+
+The key idea is:
+the BFF hides the complexity of multiple microservices from the frontend.
+The frontend only needs to know a small set of BFF APIs, and the BFF is responsible for orchestrating calls to customer-service, policy-service (if needed), and data-pipeline-service."
+
+
+7) How they work together – one-liner summary
+---------------------------------------------
+
+"Putting it all together:
+- **config-service** centralizes configuration,
+- **discovery-service** lets services find each other,
+- **customer-service** owns customer identity and authentication,
+- **policy-service** manages raw policy records,
+- **data-pipeline-service** ingests, standardizes, and stitches policies into unified portfolios and advisories,
+- and **bff-service** sits in front, exposing a simple set of APIs to the frontend by orchestrating all the backend services behind the scenes."
+

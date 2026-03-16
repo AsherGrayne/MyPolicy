@@ -1,0 +1,109 @@
+Presentation bullets – what I have built
+========================================
+
+1) Data-pipeline-service – core capabilities
+-------------------------------------------
+- **CSV ingestion pipeline**
+  - Accepts CSV uploads via REST (`POST /api/pipeline/upload`) with `file` + `collectionName`.
+  - Parses CSV files with headers into structured rows (`FileProcessingService`).
+  - Performs basic validation (non-empty file, headers present, at least one data row).
+- **Metadata-driven standardization**
+  - Loads `mapping_config.json` at startup (`MappingConfig`).
+  - Uses a metadata-driven engine (`MetadataIngestionService`) to map insurer-specific field names into a standard `StandardizedRecord` model.
+  - Supports multiple insurer collections (life, auto, health) without hard-coding column names.
+- **Data massaging & type coercion**
+  - Automatically coerces key numeric and date-like fields (DOB, Mobile, PolicyStartDate, SumAssured, premiums, etc.) into appropriate numeric types before inserting into MongoDB.
+- **MongoDB ingestion**
+  - Inserts parsed and massaged rows into MongoDB collections (e.g. `life_insurance`, `auto_insurance`, `health_insurance`).
+  - Audits how many records are ingested per collection.
+- **Identity stitching (Customer Master linkage)**
+  - Fetches standardized policy records from MongoDB and links them to `CustomerDetails` (Customer Master) using ordered matching rules:
+    - Rule 1: Match by PAN.
+    - Rule 2: Match by Mobile + DOB.
+    - Rule 3: Match by Email + DOB.
+  - Builds `UnifiedPortfolioRecord` entries with customerId, policy details, and encrypted PII (PAN, mobile, email).
+  - Tracks `totalProcessed`, `matched`, and `unmatched` counts as a `StitchingResult`.
+- **Unified portfolio API**
+  - Provides a stitched portfolio view (via portfolio-related services/controllers) that can be consumed by the BFF to show a consolidated customer portfolio.
+
+2) Config-service – centralized configuration
+---------------------------------------------
+- **Centralized config server**
+  - Spring Cloud Config Server running on port `8888` as the single source of truth for configuration.
+- **Externalized service configs**
+  - Serves YAML/properties for services like `customer-service`, `bff-service`, and others (ports, DB URIs, Feign URLs, logging, actuator exposure).
+- **File-based repo for development**
+  - Uses a local `config-repo` (classpath and file system) so configs are easy to version, edit, and share in a dev setup.
+- **Supports YAML and properties**
+  - Reads both `.yaml` and `.properties` files, letting each microservice organize configuration in the most convenient format.
+- **Secured endpoints**
+  - Protects config endpoints with basic auth (`admin` / `config123`) so only trusted clients can fetch environment details.
+- **Operational visibility**
+  - Exposes actuator endpoints like `health`, `info`, `refresh`, and `env` to monitor the config server and trigger config refresh without redeploys.
+- **Startup ordering**
+  - Must be started **before** other backend services so they can fetch configuration on startup.
+
+3) Policy-service – what it provides
+------------------------------------
+- **Policy domain model**
+  - `Policy` entity stored in MongoDB (`policies` collection) with indexes on `policyNumber` + `insurerId`.
+  - Fields include customerId, insurerId, policyNumber, policyType, planName, premiumAmount, sumAssured, startDate, endDate, status, timestamps.
+- **CRUD and query APIs**
+  - `POST /api/v1/policies` – create a new policy from `PolicyRequest`.
+  - `GET /api/v1/policies/customer/{customerId}` – fetch all policies for a given customer.
+  - `GET /api/v1/policies/{id}` – get a single policy by ID.
+  - `GET /api/v1/policies` – list all policies.
+  - `PATCH /api/v1/policies/{id}/status?status=...` – update policy status.
+  - `DELETE /api/v1/policies/{id}` – delete a policy.
+- **Support for integration**
+  - Exposes a clean policy API that can be called by other services (e.g., BFF or data-pipeline) when required.
+
+4) Connection between backend services
+--------------------------------------
+- **Configuration & discovery**
+  - `config-service` (port 8888) centralizes configuration for all services.
+  - `discovery-service` (Eureka, port 8761) lets services register and discover each other by logical name.
+- **Domain services**
+  - `customer-service` (8081): owns customer master data and authentication.
+  - `policy-service` (8085): owns policy records and CRUD operations.
+  - `data-pipeline-service` (8082): ingests insurer datasets, standardizes them, and stitches policies to customers into a unified portfolio view.
+- **Backend-for-Frontend (BFF)**
+  - `bff-service` (8090) acts as the single entry point for the UI.
+  - Uses Feign/HTTP clients to call:
+    - `customer-service` for customer details by customerId.
+    - `data-pipeline-service` for stitched portfolio (`unified_portfolio`).
+    - (Can also interact with `policy-service` directly if needed).
+- **Portfolio aggregation flow**
+  - `PortfolioService` in BFF:
+    - Calls `customer-service` to fetch `CustomerDTO`.
+    - Calls `data-pipeline-service` to fetch `DataPipelinePortfolioResponse` (stitched policies).
+    - Maps stitched records into BFF-level `PolicyDTO` objects.
+    - Calculates total premium and total coverage across all policies.
+    - Returns a single `PortfolioResponse` to the frontend.
+
+5) Connection between backend and frontend
+------------------------------------------
+- **Authentication and login**
+  - Flutter frontend login screen collects `Customer ID/User ID` and password.
+  - Frontend calls BFF login endpoint (`/api/bff/auth/login`) through an API client.
+  - User ID is effectively linked to the customer identity used in backend services; upon success, frontend navigates to the dashboard with the resolved `customerId`.
+- **Portfolio retrieval**
+  - After login, frontend dashboard requests the portfolio from BFF:
+    - `GET /api/bff/portfolio/{customerId}` with Bearer JWT token.
+  - BFF internally orchestrates:
+    - customer details from `customer-service`.
+    - stitched portfolio from `data-pipeline-service`.
+  - The response contains:
+    - customer profile data.
+    - list of normalized policies.
+    - total premium and total coverage numbers.
+- **UI behaviour**
+  - Login screen shows meaningful error messages on API failures.
+  - On successful login, the user is redirected to a dashboard that visualizes the aggregated portfolio returned by BFF.
+
+Use these bullets as talking points:
+- Start with data-pipeline-service capabilities.
+- Then highlight policy-service APIs.
+- Then explain how all backend services collaborate (config, discovery, domain services, BFF).
+- Finally, show how the Flutter frontend only talks to BFF, which hides the complexity of the microservices behind a simple login + portfolio experience.
+

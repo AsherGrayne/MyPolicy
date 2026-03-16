@@ -1,0 +1,188 @@
+from pathlib import Path
+
+import markdown
+import subprocess
+import sys
+
+
+def render_markdown_to_pdf(md_path: Path, title: str, html_name: str, pdf_name: str) -> None:
+    root = md_path.parent
+    html_path = root / html_name
+    pdf_path = root / pdf_name
+
+    text = md_path.read_text(encoding="utf-8")
+
+    body_html = markdown.markdown(
+        text,
+        extensions=["fenced_code", "tables", "toc"],
+    )
+
+    html_full = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>{title}</title>
+  <style>
+    @page {{
+      size: A4;
+      margin: 20mm 18mm 20mm 18mm;
+    }}
+    body {{
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 11pt;
+      color: #1a202c;
+      line-height: 1.4;
+    }}
+    h1, h2, h3, h4 {{
+      font-weight: 700;
+      color: #0f4c81;
+      margin-top: 18px;
+      margin-bottom: 8px;
+    }}
+    h1 {{
+      font-size: 20pt;
+      border-bottom: 2px solid #0f4c81;
+      padding-bottom: 4px;
+    }}
+    h2 {{
+      font-size: 16pt;
+    }}
+    h3 {{
+      font-size: 13pt;
+    }}
+    p {{
+      margin: 4px 0;
+    }}
+    ul, ol {{
+      margin: 4px 0 4px 22px;
+    }}
+    code, pre {{
+      font-family: "Fira Code", "Source Code Pro", Menlo, Consolas, monospace;
+      font-size: 9pt;
+    }}
+    pre {{
+      background: #f7fafc;
+      border-radius: 4px;
+      padding: 6px 8px;
+      border: 1px solid #e2e8f0;
+      overflow-x: auto;
+      margin: 6px 0 8px 0;
+    }}
+    blockquote {{
+      border-left: 3px solid #0f4c81;
+      padding-left: 10px;
+      color: #4a5568;
+      margin: 6px 0;
+    }}
+    table {{
+      border-collapse: collapse;
+      margin: 8px 0;
+      width: 100%;
+      font-size: 10pt;
+    }}
+    th, td {{
+      border: 1px solid #e2e8f0;
+      padding: 4px 6px;
+      text-align: left;
+    }}
+    th {{
+      background: #edf2f7;
+      font-weight: 600;
+    }}
+    header {{
+      text-align: right;
+      font-size: 9pt;
+      color: #718096;
+      border-bottom: 1px solid #e2e8f0;
+      margin-bottom: 8px;
+      padding-bottom: 2px;
+    }}
+    footer {{
+      position: fixed;
+      bottom: 6mm;
+      left: 0;
+      right: 0;
+      text-align: center;
+      font-size: 8pt;
+      color: #a0aec0;
+    }}
+  </style>
+</head>
+<body>
+  <header>{title}</header>
+  {body_html}
+  <footer>Generated Presentation · MyPolicy</footer>
+</body>
+</html>
+"""
+
+    html_path.write_text(html_full, encoding="utf-8")
+
+    chrome_candidates = [
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+    ]
+
+    browser = next((p for p in chrome_candidates if Path(p).exists()), None)
+    if not browser:
+        raise RuntimeError(
+            "No Chrome/Edge executable found. Install Google Chrome or Microsoft Edge "
+            "to enable PDF generation."
+        )
+
+    file_url = html_path.resolve().as_uri()
+    pdf_out = str(pdf_path.resolve())
+
+    cmd = [
+        browser,
+        "--headless=new",
+        "--disable-gpu",
+        f"--print-to-pdf={pdf_out}",
+        file_url,
+    ]
+
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        sys.stderr.write(result.stdout + "\n" + result.stderr + "\n")
+        raise RuntimeError(f"PDF generation failed for {md_path.name} (exit {result.returncode}).")
+
+    print(f"Generated HTML: {html_path}")
+    print(f"Generated PDF:  {pdf_path}")
+
+
+def main() -> None:
+    root = Path(__file__).parent
+
+    files = [
+        (
+            root / "presentation-bullets.txt",
+            "MyPolicy – Presentation Bullets",
+            "presentation-bullets_styled.html",
+            "presentation-bullets.pdf",
+        ),
+        (
+            root / "api-summary.txt",
+            "MyPolicy – API Summary",
+            "api-summary_styled.html",
+            "api-summary.pdf",
+        ),
+        (
+            root / "service-functions-transcript.txt",
+            "MyPolicy – Service Functions Transcript",
+            "service-functions-transcript_styled.html",
+            "service-functions-transcript.pdf",
+        ),
+    ]
+
+    for md_path, title, html_name, pdf_name in files:
+        if not md_path.exists():
+            print(f"Skipping missing file: {md_path}")
+            continue
+        render_markdown_to_pdf(md_path, title, html_name, pdf_name)
+
+
+if __name__ == "__main__":
+    main()
+

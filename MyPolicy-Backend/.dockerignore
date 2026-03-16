@@ -1,9 +1,0 @@
-target/
-!target/*.jar
-.mvn/
-*.md
-*.ps1
-.git/
-.gitignore
-*.log
-*.tmp

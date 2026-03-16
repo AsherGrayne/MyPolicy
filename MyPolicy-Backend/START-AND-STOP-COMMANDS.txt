@@ -1,0 +1,66 @@
+================================================================================
+  STOP ALL RUNNING SERVICES (run in PowerShell from any directory)
+================================================================================
+
+$ports = @(8888, 8761, 8081, 8085, 8082, 8090)
+foreach ($p in $ports) {
+  Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue |
+    ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }
+}
+Get-Process -Name "dart" -ErrorAction SilentlyContinue | Stop-Process -Force
+Get-Process -Name "java" -ErrorAction SilentlyContinue | Stop-Process -Force
+
+--------------------------------------------------------------------------------
+  Or one-liner:
+--------------------------------------------------------------------------------
+$ports = @(8888, 8761, 8081, 8085, 8082, 8090); foreach ($p in $ports) { Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue } }; Get-Process -Name "dart" -ErrorAction SilentlyContinue | Stop-Process -Force; Get-Process -Name "java" -ErrorAction SilentlyContinue | Stop-Process -Force
+
+
+================================================================================
+  START ALL BACKEND SERVICES (open one terminal per service, order matters)
+================================================================================
+Base path: POLICY-AGGRGATE\MyPolicy-Backend
+
+1) Config (8888):
+   cd config-service
+   mvn spring-boot:run
+
+2) Discovery (8761) — new terminal:
+   cd discovery-service
+   mvn spring-boot:run
+
+3) Customer (8081) — new terminal:
+   cd customer-service
+   mvn spring-boot:run
+
+4) Policy (8085) — new terminal:
+   cd policy-service
+   mvn spring-boot:run
+
+5) Data-pipeline (8082) — new terminal:
+   cd data-pipeline-service
+   mvn spring-boot:run
+
+6) BFF (8090) — new terminal:
+   cd bff-service
+   mvn spring-boot:run "-Dspring-boot.run.arguments=--server.port=8090"
+
+
+================================================================================
+  START FRONTEND (new terminal)
+================================================================================
+   cd POLICY-AGGRGATE\frontend
+   flutter run -d chrome
+
+
+================================================================================
+  Full paths (if not already in repo root)
+================================================================================
+Replace "cd config-service" etc. with full path, e.g.:
+   cd C:\Users\profe\Desktop\Testing\POLICY-AGGRGATE\MyPolicy-Backend\config-service
+   mvn spring-boot:run
+
+Same for discovery-service, customer-service, policy-service, data-pipeline-service, bff-service.
+Frontend:
+   cd C:\Users\profe\Desktop\Testing\POLICY-AGGRGATE\frontend
+   flutter run -d chrome
